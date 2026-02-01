@@ -47,8 +47,9 @@ def main() -> None:
     # Output results
     print("···")
     print(f"Generated {len(pairs)} chats")
-    for person1, person2 in pairs:
-        print(f"{person1.name},{person2.name}")
+    for group in pairs:
+        names = ",".join(person.name for person in group)
+        print(names)
 
 
 if __name__ == "__main__":
