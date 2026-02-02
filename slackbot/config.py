@@ -17,6 +17,9 @@ DONUT_CHAT_CHANNEL = os.environ.get("DONUT_CHAT_CHANNEL", "donut-chat")
 # Server port
 PORT = int(os.environ.get("PORT", 3000))
 
+# Send startup message
+SEND_STARTUP_MESSAGE = os.environ.get("SEND_STARTUP_MESSAGE", "false").lower() == "true"
+
 # File paths (relative to workspace root)
 REGISTRY_PATH = os.environ.get("REGISTRY_PATH", "./registry.csv")
 HISTORY_PATH = os.environ.get("HISTORY_PATH", "./history.csv")
