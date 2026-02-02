@@ -16,6 +16,15 @@ def register_handlers(app: App) -> None:
         """Respond when the bot is mentioned."""
         channel = event.get("channel")
         ts = event.get("ts")
+        text = event.get("text", "")
+
+        if "good boy" in text.lower():
+            image_url = "https://i.ytimg.com/vi/cIJd1m2kXMQ/maxresdefault.jpg"
+            alt_text = "erm!"
+        else:
+            image_url = "https://i.ytimg.com/vi/1KHSR_Flqww/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJD&rs=AOn4CLD-pjkiEtODTgatoYJ4KVIa1rgupA"
+            alt_text = "hi!"
+
         client.chat_postMessage(
             channel=channel,
             thread_ts=ts,
@@ -23,8 +32,8 @@ def register_handlers(app: App) -> None:
             blocks=[
                 {
                     "type": "image",
-                    "image_url": "https://i.ytimg.com/vi/1KHSR_Flqww/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJD&rs=AOn4CLD-pjkiEtODTgatoYJ4KVIa1rgupA",
-                    "alt_text": "Dug!",
+                    "image_url": image_url,
+                    "alt_text": alt_text,
                 }
             ],
         )
@@ -79,11 +88,17 @@ def register_handlers(app: App) -> None:
             print(f"[MESSAGE] Skipped: system message (subtype={subtype})")
             return
 
-        # Only process messages in donut-chat channel
         channel = event.get("channel")
-        if channel != config.DONUT_CHAT_CHANNEL:
+        text = event.get("text", "")
+
+        # Check if bot is mentioned
+        bot_user_id = client.auth_test()["user_id"]
+        bot_mentioned = f"<@{bot_user_id}>" in text
+
+        # Only process messages in donut-chat channel, or if bot is mentioned
+        if channel != config.DONUT_CHAT_CHANNEL and not bot_mentioned:
             print(
-                f"[MESSAGE] Skipped: wrong channel (got={channel}, want={config.DONUT_CHAT_CHANNEL})"
+                f"[MESSAGE] Skipped: wrong channel and bot not mentioned (got={channel}, want={config.DONUT_CHAT_CHANNEL})"
             )
             return
 
@@ -94,7 +109,6 @@ def register_handlers(app: App) -> None:
             )
             return
 
-        text = event.get("text", "")
         ts = event.get("ts")
 
         if not text:
