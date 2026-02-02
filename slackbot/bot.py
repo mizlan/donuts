@@ -10,8 +10,11 @@ print(f"[BOT] DONUT_CHAT_CHANNEL: {config.DONUT_CHAT_CHANNEL}")
 print(f"[BOT] REGISTRY_PATH: {config.REGISTRY_PATH}")
 print(f"[BOT] HISTORY_PATH: {config.HISTORY_PATH}")
 
-# Initialize Slack Bolt app
-app = App(token=config.SLACK_BOT_TOKEN, signing_secret=config.SLACK_SIGNING_SECRET)
+# Initialize Slack Bolt app with HTTP mode (handles URL verification automatically)
+app = App(
+    token=config.SLACK_BOT_TOKEN,
+    signing_secret=config.SLACK_SIGNING_SECRET,
+)
 
 print("[BOT] Slack app initialized")
 
@@ -23,8 +26,7 @@ print("[BOT] Event handlers registered")
 
 def start():
     """Start the bot server."""
-    port = int(os.environ.get("PORT", 3000))
-    print(f"[BOT] Starting server on port {port}...")
+    print(f"[BOT] Starting server on port {config.PORT}...")
 
     # Send startup message with image
     try:
@@ -47,7 +49,7 @@ def start():
     except Exception as e:
         print(f"[BOT] ERROR sending startup message: {e}")
 
-    app.start(port=port)
+    app.start(port=config.PORT)
 
 
 if __name__ == "__main__":

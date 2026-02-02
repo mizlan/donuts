@@ -72,9 +72,9 @@ def register_handlers(app: App) -> None:
             print(f"[MESSAGE] Skipped: bot message (bot_id={event.get('bot_id')})")
             return
 
-        # Skip system messages (channel_join, member_left, etc)
+        # Skip system messages (channel_join, member_left)
         subtype = event.get("subtype")
-        if subtype:
+        if subtype in ("channel_join", "member_left"):
             print(f"[MESSAGE] Skipped: system message (subtype={subtype})")
             return
 
@@ -112,13 +112,15 @@ def register_handlers(app: App) -> None:
         try:
             registry = history_module.parse_registry(config.REGISTRY_PATH)
             identifier_map = _build_identifier_mapping(registry)
-            
+
             # Check if at least one mention is a real person in registry
-            mentioned_names = _get_valid_mentioned_names(mentions, client, registry, identifier_map)
+            mentioned_names = _get_valid_mentioned_names(
+                mentions, client, registry, identifier_map
+            )
             if not mentioned_names:
                 print(f"[MESSAGE] Skipped: no valid person mentions found")
                 return
-            
+
             # React with white checkmark
             client.reactions_add(channel=channel, timestamp=ts, name="white_check_mark")
 
@@ -129,7 +131,9 @@ def register_handlers(app: App) -> None:
             )
             client.chat_postMessage(channel=channel, thread_ts=ts, text=thread_reply)
 
-            print(f"[MESSAGE] Detected donut chat with {len(mentioned_names)} valid mention(s)")
+            print(
+                f"[MESSAGE] Detected donut chat with {len(mentioned_names)} valid mention(s)"
+            )
 
         except Exception as e:
             print(f"Error in handle_message: {e}")
@@ -137,38 +141,46 @@ def register_handlers(app: App) -> None:
     @app.event("reaction_added")
     def handle_reaction(event, client):
         """Track confirmation when someone reacts with checkmark to donut chat."""
-        
+
         print(f"[REACTION EVENT] Received: {event}")
-        
+
         reaction = event.get("reaction")
         user_id = event.get("user")
         channel = event.get("item", {}).get("channel")
         ts = event.get("item", {}).get("ts")
-        
-        print(f"[REACTION] reaction={reaction}, user={user_id}, channel={channel}, ts={ts}")
-        
+
+        print(
+            f"[REACTION] reaction={reaction}, user={user_id}, channel={channel}, ts={ts}"
+        )
+
         if reaction != "white_check_mark":
-            print(f"[REACTION] Skipped: wrong emoji (got={reaction}, want=white_check_mark)")
+            print(
+                f"[REACTION] Skipped: wrong emoji (got={reaction}, want=white_check_mark)"
+            )
             return
-        
+
         if not user_id:
             print(f"[REACTION] Skipped: no user_id")
             return
-        
+
         if not channel:
             print(f"[REACTION] Skipped: no channel")
             return
-        
+
         if not ts:
             print(f"[REACTION] Skipped: no timestamp")
             return
-        
+
         # Only process reactions in donut-chat channel
         if channel != config.DONUT_CHAT_CHANNEL:
-            print(f"[REACTION] Skipped: wrong channel (got={channel}, want={config.DONUT_CHAT_CHANNEL})")
+            print(
+                f"[REACTION] Skipped: wrong channel (got={channel}, want={config.DONUT_CHAT_CHANNEL})"
+            )
             return
-        
-        print(f"[REACTION] Processing reaction: user={user_id}, channel={channel}, ts={ts}")
+
+        print(
+            f"[REACTION] Processing reaction: user={user_id}, channel={channel}, ts={ts}"
+        )
 
         try:
             # Fetch the message
@@ -194,7 +206,7 @@ def register_handlers(app: App) -> None:
             if not mentions:
                 print(f"[REACTION] Skipped: no mentions in message")
                 return
-            
+
             if not poster_user_id:
                 print(f"[REACTION] Skipped: no poster_user_id")
                 return
@@ -216,7 +228,9 @@ def register_handlers(app: App) -> None:
             poster_name = registry[identifier_map[poster_email]].name
 
             # Get mentioned people's emails and names
-            mentioned_names = _get_valid_mentioned_names(mentions, client, registry, identifier_map)
+            mentioned_names = _get_valid_mentioned_names(
+                mentions, client, registry, identifier_map
+            )
             if not mentioned_names:
                 print(f"[REACTION] Skipped: No valid mentions found in message {ts}")
                 return
@@ -228,7 +242,7 @@ def register_handlers(app: App) -> None:
                 tracking.append_to_history(
                     poster_name, mentioned_name, config.HISTORY_PATH
                 )
-            
+
             # Try to strikethrough the pair in the pairings message
             _strikethrough_pair_in_message(
                 client, channel, poster_name, mentioned_names
@@ -254,7 +268,9 @@ def register_handlers(app: App) -> None:
             if not bot_found:
                 print(f"[REACTION] WARNING: No bot message found in thread")
 
-            print(f"[REACTION] Success! Confirmed {len(mentioned_names)} donut chat(s): {poster_name}")
+            print(
+                f"[REACTION] Success! Confirmed {len(mentioned_names)} donut chat(s): {poster_name}"
+            )
 
         except Exception as e:
             print(f"Error in handle_reaction: {e}")
@@ -273,7 +289,7 @@ def _strikethrough_pair_in_message(
     client, channel: str, person1: str, person2_list: list[str]
 ) -> None:
     """Find and strikethrough a pair in the pairings message.
-    
+
     Args:
         client: Slack client
         channel: Channel to search in
@@ -283,19 +299,19 @@ def _strikethrough_pair_in_message(
     try:
         # Get last 50 messages from the channel, filter for bot messages with pairings
         response = client.conversations_history(channel=channel, limit=50)
-        
+
         for message in response.get("messages", []):
             if not message.get("bot_id"):
                 continue
-            
+
             text = message.get("text", "")
             if "Generated" not in text:
                 continue
-            
+
             # Try to find and strikethrough pairs
             lines = text.split("\n")
             updated = False
-            
+
             for person2 in person2_list:
                 # Look for line matching this pair (case-insensitive)
                 # Handle variations like "person1 ⋯ person2" or "person1 ... person2"
@@ -306,9 +322,11 @@ def _strikethrough_pair_in_message(
                         if "~" not in line:
                             lines[i] = f"~{line}~"
                             updated = True
-                            print(f"[STRIKETHROUGH] Found and strikethrough pair: {person1} ⋯ {person2}")
+                            print(
+                                f"[STRIKETHROUGH] Found and strikethrough pair: {person1} ⋯ {person2}"
+                            )
                         break
-            
+
             if updated:
                 new_text = "\n".join(lines)
                 msg_ts = message.get("ts")
@@ -332,13 +350,13 @@ def _get_valid_mentioned_names(
     mentions: list[str], client, registry: dict, identifier_map: dict[str, int]
 ) -> list[str]:
     """Get names of valid people from mention list.
-    
+
     Args:
         mentions: List of user IDs mentioned
         client: Slack client
         registry: Person registry
         identifier_map: Mapping of email/name to person ID
-    
+
     Returns:
         List of names for valid mentions (people in registry), empty if none found
     """
@@ -346,19 +364,24 @@ def _get_valid_mentioned_names(
     for mention_id in mentions:
         user_info = slack_client.get_user_info(client, mention_id)
         if not user_info:
-            print(f"[VALIDATION] Skipped mention: Could not fetch user info for {mention_id}")
+            print(
+                f"[VALIDATION] Skipped mention: Could not fetch user info for {mention_id}"
+            )
             continue
-        
+
         # Try to match by email first (with normalization), then by name
         person_id = None
         if user_info["email"]:
             normalized_email = _normalize_email(user_info["email"])
             # Check against normalized keys in identifier_map
             for key, pid in identifier_map.items():
-                if key.lower() == normalized_email or _normalize_email(key) == normalized_email:
+                if (
+                    key.lower() == normalized_email
+                    or _normalize_email(key) == normalized_email
+                ):
                     person_id = pid
                     break
-        
+
         if person_id is None and user_info["real_name"]:
             # Case-insensitive name match
             normalized_name = user_info["real_name"].lower()
@@ -366,12 +389,12 @@ def _get_valid_mentioned_names(
                 if key.lower() == normalized_name:
                     person_id = pid
                     break
-        
+
         if person_id is None:
             print(
                 f"[VALIDATION] Skipped mention: {mention_id} ({user_info.get('email') or user_info.get('real_name')}) not in registry"
             )
             continue
-        
+
         mentioned_names.append(registry[person_id].name)
     return mentioned_names
