@@ -1,6 +1,7 @@
 """Event handlers for the Slack donut bot."""
 
 import re
+from itertools import combinations
 from slack_bolt import App
 
 from . import slack_client, tracking, config
@@ -235,13 +236,13 @@ def register_handlers(app: App) -> None:
                 print(f"[REACTION] Skipped: No valid mentions found in message {ts}")
                 return
 
-            # Record donut chat for each mention
-            print(f"[REACTION] Recording {len(mentioned_names)} donut chat(s)...")
-            for mentioned_name in mentioned_names:
-                print(f"[REACTION] Recording: {poster_name} <-> {mentioned_name}")
-                tracking.append_to_history(
-                    poster_name, mentioned_name, config.HISTORY_PATH
-                )
+            # Record donut chat for each pair
+            all_people = [poster_name] + mentioned_names
+            pairs = _generate_all_pairs(all_people)
+            print(f"[REACTION] Recording {len(pairs)} donut chat pair(s)...")
+            for person1, person2 in pairs:
+                print(f"[REACTION] Recording: {person1} <-> {person2}")
+                tracking.append_to_history(person1, person2, config.HISTORY_PATH)
 
             # Try to strikethrough the pair in the pairings message
             _strikethrough_pair_in_message(
@@ -274,6 +275,18 @@ def register_handlers(app: App) -> None:
 
         except Exception as e:
             print(f"Error in handle_reaction: {e}")
+
+
+def _generate_all_pairs(people: list[str]) -> list[tuple[str, str]]:
+    """Generate all unique pairs from a list of people.
+
+    Args:
+        people: List of person names
+
+    Returns:
+        List of (person1, person2) tuples
+    """
+    return list(combinations(people, 2))
 
 
 def _build_identifier_mapping(registry: dict[int, object]) -> dict[str, int]:
