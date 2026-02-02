@@ -10,6 +10,7 @@ dependencies = [
     "ruff>=0.14.14",
     "slack-bolt>=1.18.1",
     "python-dotenv>=1.0.0",
+    "better-profanity>=0.7.0",
 ]
 
 [dependency-groups]

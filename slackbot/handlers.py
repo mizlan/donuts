@@ -3,6 +3,7 @@
 import re
 from itertools import combinations
 from slack_bolt import App
+from better_profanity import profanity
 
 from . import slack_client, tracking, config
 from src import history as history_module, solver
@@ -18,12 +19,15 @@ def register_handlers(app: App) -> None:
         ts = event.get("ts")
         text = event.get("text", "")
 
-        if "good boy" in text.lower():
+        if profanity.contains_profanity(text):
+            image_url = "https://avatars.mds.yandex.net/get-kinopoisk-image/1600647/b19fb75a-b0bd-4949-bf69-9fc6b658e340/3840x"
+            alt_text = "uh oh!"
+        elif "good boy" in text.lower():
             image_url = "https://i.ytimg.com/vi/cIJd1m2kXMQ/maxresdefault.jpg"
-            alt_text = "erm!"
+            alt_text = "Good boy Dug!"
         else:
             image_url = "https://i.ytimg.com/vi/1KHSR_Flqww/hq720.jpg?sqp=-oaymwEhCK4FEIIDSFryq4qpAxMIARUAAAAAGAElAADIQj0AgKJD&rs=AOn4CLD-pjkiEtODTgatoYJ4KVIa1rgupA"
-            alt_text = "hi!"
+            alt_text = "Dug!"
 
         client.chat_postMessage(
             channel=channel,
