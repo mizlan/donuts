@@ -1,0 +1,1 @@
+"""Slack donut bot module."""

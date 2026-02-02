@@ -68,9 +68,7 @@ class TestMakeAssignmentEven:
         # Alice and Bob should not be together in any group
         for group in result:
             emails = {person.email for person in group}
-            assert not (
-                "alice@example.com" in emails and "bob@example.com" in emails
-            )
+            assert not ("alice@example.com" in emails and "bob@example.com" in emails)
 
 
 class TestMakeAssignmentOdd:
