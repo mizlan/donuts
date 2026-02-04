@@ -236,6 +236,9 @@ def register_handlers(app: App) -> None:
                 print(f"ERROR: No email found for user {poster_user_id}")
                 return
 
+            # Normalize email for lookup
+            poster_email = _normalize_email(poster_email)
+
             # Look up names in registry
             registry = history_module.parse_registry(config.REGISTRY_PATH)
             identifier_map = _build_identifier_mapping(registry)
