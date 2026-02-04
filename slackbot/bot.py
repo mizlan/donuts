@@ -34,7 +34,10 @@ handler = SlackRequestHandler(bolt_app)
 
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
-    return handler.handle(request)
+    print(f"[FLASK] Received: content_type={request.content_type}")
+    response = handler.handle(request)
+    print(f"[FLASK] Response status: {response.status_code}")
+    return response
 
 
 def load_registry() -> dict[str, str]:
@@ -96,7 +99,7 @@ def start():
     if config.SEND_STARTUP_MESSAGE:
         send_startup_message()
 
-    flask_app.run(port=config.PORT)
+    flask_app.run(host="0.0.0.0", port=config.PORT)
 
 
 if __name__ == "__main__":
