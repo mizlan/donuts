@@ -197,6 +197,11 @@ def register_handlers(app: App) -> None:
             )
             return
 
+        # Check if this message was already recorded
+        if tracking.history_contains_ts(config.HISTORY_PATH, ts):
+            print(f"[REACTION] Skipped: message {ts} already recorded in history")
+            return
+
         print(
             f"[REACTION] Processing reaction: user={user_id}, channel={channel}, ts={ts}"
         )
@@ -263,7 +268,7 @@ def register_handlers(app: App) -> None:
             print(f"[REACTION] Recording {len(pairs)} donut chat pair(s)...")
             for person1, person2 in pairs:
                 print(f"[REACTION] Recording: {person1} <-> {person2}")
-                tracking.append_to_history(person1, person2, config.HISTORY_PATH)
+                tracking.append_to_history(person1, person2, config.HISTORY_PATH, ts)
 
             # Try to strikethrough the pair in the pairings message
             _strikethrough_pair_in_message(

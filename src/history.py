@@ -6,7 +6,8 @@ from pathlib import Path
 from rich import print
 
 # Constants
-EXPECTED_CSV_COLUMNS = 2
+MIN_CSV_COLUMNS = 2
+MAX_CSV_COLUMNS = 3
 IDENTIFIER_MAPPING_ERROR_TEMPLATE = "duplicate key {identifier} in registry"
 PERSON_NOT_IN_REGISTRY_WARNING = (
     "Person {person} appears in history but not in registry, skipping"
@@ -22,21 +23,23 @@ class Person:
     email: str
 
 
-def _parse_csv_row(row: list[str]) -> tuple[str, str] | None:
-    """Parse and validate a CSV row with name and email.
+def _parse_csv_row(row: list[str]) -> tuple[str, str, str | None] | None:
+    """Parse and validate a CSV row with person1, person2, and optional slack_ts.
 
     Args:
         row: A CSV row
 
     Returns:
-        Tuple of (name, email) if valid, None otherwise
+        Tuple of (person1, person2, slack_ts) if valid, None otherwise.
+        slack_ts is None for rows without a timestamp.
     """
-    if len(row) != EXPECTED_CSV_COLUMNS:
+    if len(row) < MIN_CSV_COLUMNS or len(row) > MAX_CSV_COLUMNS:
         if row:  # Only warn if row is not empty
             print(f":warning: {INVALID_CSV_LINE_WARNING.format(line=row)}")
         return None
-    name, email = row
-    return name, email
+    person1, person2 = row[0], row[1]
+    slack_ts = row[2] if len(row) == MAX_CSV_COLUMNS else None
+    return person1, person2, slack_ts
 
 
 def parse_registry(filename: str | Path) -> dict[int, Person]:
@@ -60,7 +63,7 @@ def parse_registry(filename: str | Path) -> dict[int, Person]:
                 if parsed is None:
                     continue
 
-                name, email = parsed
+                name, email, _ = parsed
                 person_id = len(registry)
                 registry[person_id] = Person(name=name, email=email)
 
@@ -125,7 +128,7 @@ def parse_history(
                 if parsed is None:
                     continue
 
-                person1, person2 = parsed
+                person1, person2, _ = parsed
 
                 if person1 not in identifier_to_id:
                     _warn_unknown_person(person1)

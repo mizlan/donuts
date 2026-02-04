@@ -4,13 +4,38 @@ import csv
 from pathlib import Path
 
 
-def append_to_history(person1: str, person2: str, history_path: str) -> None:
+def history_contains_ts(history_path: str, ts: str) -> bool:
+    """Check if a Slack message timestamp already exists in history.
+
+    Args:
+        history_path: Path to history.csv file
+        ts: Slack message timestamp to check
+
+    Returns:
+        True if the timestamp exists in history, False otherwise
+    """
+    path = Path(history_path)
+    if not path.exists():
+        return False
+
+    with open(path, "r", newline="") as f:
+        reader = csv.reader(f)
+        for row in reader:
+            if len(row) >= 3 and row[2] == ts:
+                return True
+    return False
+
+
+def append_to_history(
+    person1: str, person2: str, history_path: str, slack_ts: str | None = None
+) -> None:
     """Append a donut chat pair to history.csv.
 
     Args:
         person1: Name or email of first person
         person2: Name or email of second person
         history_path: Path to history.csv file
+        slack_ts: Optional Slack message timestamp for deduplication
     """
     try:
         path = Path(history_path)
@@ -23,7 +48,10 @@ def append_to_history(person1: str, person2: str, history_path: str) -> None:
                 rows = list(reader)
 
         # Append new row
-        rows.append([person1, person2])
+        row = [person1, person2]
+        if slack_ts:
+            row.append(slack_ts)
+        rows.append(row)
 
         # Write back
         with open(path, "w", newline="") as f:
