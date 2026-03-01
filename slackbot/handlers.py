@@ -60,12 +60,13 @@ def register_handlers(app: App) -> None:
             for person1, person2 in pairs:
                 text += f"• {person1.name} ⋯ {person2.name}\n"
 
-            # Post to donut-chat channel
-            response = client.chat_postMessage(
-                channel=config.DONUT_CHAT_CHANNEL, text=text
+            # Post to the channel where the command was invoked
+            channel = command["channel_id"]
+            client.chat_postMessage(
+                channel=channel, text=text
             )
 
-            print(f"Posted pairings message to {config.DONUT_CHAT_CHANNEL}")
+            print(f"Posted pairings message to {channel}")
 
         except Exception as e:
             print(f"Error in /makedonuts: {e}")
