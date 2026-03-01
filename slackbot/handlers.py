@@ -6,7 +6,7 @@ from slack_bolt import App
 from better_profanity import profanity
 
 from . import slack_client, tracking, config
-from src import history as history_module, solver
+from src import history, solver
 
 
 def register_handlers(app: App) -> None:
@@ -49,8 +49,8 @@ def register_handlers(app: App) -> None:
 
         try:
             # Load registry and history
-            registry = history_module.parse_registry(config.REGISTRY_PATH)
-            past_meetings = history_module.parse_history(registry, config.HISTORY_PATH)
+            registry = history.parse_registry(config.REGISTRY_PATH)
+            past_meetings = history.parse_history(registry, config.HISTORY_PATH)
 
             # Generate pairings
             pairs = solver.make_assignment(registry, past_meetings)
@@ -129,7 +129,7 @@ def register_handlers(app: App) -> None:
         print(f"[MESSAGE] Processing: text={text}, mentions={mentions}")
 
         try:
-            registry = history_module.parse_registry(config.REGISTRY_PATH)
+            registry = history.parse_registry(config.REGISTRY_PATH)
             identifier_map = _build_identifier_mapping(registry)
 
             # Check if at least one mention is a real person in registry
@@ -245,7 +245,7 @@ def register_handlers(app: App) -> None:
             poster_email = _normalize_email(poster_email)
 
             # Look up names in registry
-            registry = history_module.parse_registry(config.REGISTRY_PATH)
+            registry = history.parse_registry(config.REGISTRY_PATH)
             identifier_map = _build_identifier_mapping(registry)
 
             if poster_email not in identifier_map:
@@ -315,7 +315,7 @@ def _generate_all_pairs(people: list[str]) -> list[tuple[str, str]]:
     return list(combinations(people, 2))
 
 
-def _build_identifier_mapping(registry: dict[int, object]) -> dict[str, int]:
+def _build_identifier_mapping(registry: dict[int, history.Person]) -> dict[str, int]:
     """Build identifier to ID mapping from registry."""
     mapping = {}
     for person_id, person in registry.items():
