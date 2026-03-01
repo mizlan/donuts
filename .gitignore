@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+registry.csv
+history.csv
+slackbot/.env
