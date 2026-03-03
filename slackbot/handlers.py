@@ -130,33 +130,74 @@ def register_handlers(app: App) -> None:
         print(f"[MESSAGE] Processing: text={text}, mentions={mentions}")
 
         try:
-            registry = history.parse_registry(config.REGISTRY_PATH)
-            identifier_map = _build_identifier_mapping(registry)
-
-            # Check if at least one mention is a real person in registry
-            mentioned_names = _get_valid_mentioned_names(
-                mentions, client, registry, identifier_map
-            )
-            if not mentioned_names:
+            if _respond_to_donut_message(client, channel, ts, text):
+                print(f"[MESSAGE] Responded to donut chat message")
+            else:
                 print(f"[MESSAGE] Skipped: no valid person mentions found")
-                return
-
-            # React with white checkmark
-            client.reactions_add(channel=channel, timestamp=ts, name="white_check_mark")
-
-            # Post thread reply
-            thread_reply = (
-                "Please react to this message with :white_check_mark: "
-                "to confirm the donut chat happened!"
-            )
-            client.chat_postMessage(channel=channel, thread_ts=ts, text=thread_reply)
-
-            print(
-                f"[MESSAGE] Detected donut chat with {len(mentioned_names)} valid mention(s)"
-            )
-
         except Exception as e:
             print(f"Error in handle_message: {e}")
+
+    @app.command("/recoverdonuts")
+    def handle_recoverdonuts(ack, command, client):
+        """Recover missed donut chat responses after bot downtime."""
+        ack()
+
+        channel = config.DONUT_CHAT_CHANNEL
+        bot_user_id = client.auth_test()["user_id"]
+
+        try:
+            response = client.conversations_history(channel=channel)
+            messages = response.get("messages", [])
+        except Exception as e:
+            print(f"[RECOVER] Error fetching history: {e}")
+            client.chat_postMessage(
+                channel=command["channel_id"],
+                text=f"Error fetching channel history: {e}",
+            )
+            return
+
+        recovered = 0
+        for message in messages:
+            # Skip bot messages
+            if message.get("bot_id"):
+                continue
+
+            # Skip thread replies
+            if message.get("thread_ts") and message.get("thread_ts") != message.get("ts"):
+                continue
+
+            # Skip system messages
+            subtype = message.get("subtype")
+            if subtype in ("channel_join", "member_left"):
+                continue
+
+            text = message.get("text", "")
+            ts = message.get("ts")
+
+            if not text or not ts:
+                continue
+
+            # Check if bot already reacted with :white_check_mark:
+            reactions = message.get("reactions", [])
+            bot_already_reacted = any(
+                r.get("name") == "white_check_mark"
+                and bot_user_id in r.get("users", [])
+                for r in reactions
+            )
+            if bot_already_reacted:
+                continue
+
+            try:
+                if _respond_to_donut_message(client, channel, ts, text):
+                    recovered += 1
+                    print(f"[RECOVER] Responded to missed message {ts}")
+            except Exception as e:
+                print(f"[RECOVER] Error processing message {ts}: {e}")
+
+        client.chat_postMessage(
+            channel=command["channel_id"],
+            text=f"Recovery complete. Responded to {recovered} missed message(s).",
+        )
 
     @app.event("reaction_added")
     def handle_reaction(event, client):
@@ -302,6 +343,42 @@ def register_handlers(app: App) -> None:
 
         except Exception as e:
             print(f"Error in handle_reaction: {e}")
+
+
+def _respond_to_donut_message(client, channel: str, ts: str, text: str) -> bool:
+    """React and reply to a donut chat message if it contains valid mentions.
+
+    Args:
+        client: Slack client
+        channel: Channel ID
+        ts: Message timestamp
+        text: Message text
+
+    Returns:
+        True if the message was responded to, False otherwise.
+    """
+    mentions = re.findall(r"<@([A-Z0-9]+)>", text)
+    if not mentions:
+        return False
+
+    registry = history.parse_registry(config.REGISTRY_PATH)
+    identifier_map = _build_identifier_mapping(registry)
+
+    mentioned_names = _get_valid_mentioned_names(
+        mentions, client, registry, identifier_map
+    )
+    if not mentioned_names:
+        return False
+
+    client.reactions_add(channel=channel, timestamp=ts, name="white_check_mark")
+
+    thread_reply = (
+        "Please react to this message with :white_check_mark: "
+        "to confirm the donut chat happened!"
+    )
+    client.chat_postMessage(channel=channel, thread_ts=ts, text=thread_reply)
+
+    return True
 
 
 def _generate_all_pairs(people: list[str]) -> list[tuple[str, str]]:
