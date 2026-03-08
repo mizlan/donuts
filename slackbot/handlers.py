@@ -75,65 +75,27 @@ def register_handlers(app: App) -> None:
     @app.event("message")
     def handle_message(event, client, say):
         """Listen for donut chat confirmation messages with @mentions."""
-
-        print(f"[MESSAGE EVENT] Received: {event}")
-
-        # Ignore bot messages and messages without mentions
-        if event.get("type") != "message":
-            print(f"[MESSAGE] Skipped: not a message event (type={event.get('type')})")
-            return
-
-        if event.get("bot_id"):
-            print(f"[MESSAGE] Skipped: bot message (bot_id={event.get('bot_id')})")
-            return
-
-        # Skip system messages (channel_join, member_left)
-        subtype = event.get("subtype")
-        if subtype in ("channel_join", "member_left"):
-            print(f"[MESSAGE] Skipped: system message (subtype={subtype})")
+        if not _is_actionable_user_message(event):
             return
 
         channel = event.get("channel")
         text = event.get("text", "")
+        ts = event.get("ts")
 
-        # Check if bot is mentioned
         bot_user_id = client.auth_test()["user_id"]
         bot_mentioned = f"<@{bot_user_id}>" in text
 
-        # Only process messages in donut-chat channel, or if bot is mentioned
         if channel != config.DONUT_CHAT_CHANNEL and not bot_mentioned:
-            print(
-                f"[MESSAGE] Skipped: wrong channel and bot not mentioned (got={channel}, want={config.DONUT_CHAT_CHANNEL})"
-            )
             return
 
-        # Skip thread replies to avoid processing bot messages
-        if event.get("thread_ts"):
-            print(
-                f"[MESSAGE] Skipped: thread reply (thread_ts={event.get('thread_ts')})"
-            )
+        if event.get("thread_ts") or not text or not ts:
             return
 
-        ts = event.get("ts")
-
-        if not text:
-            print(f"[MESSAGE] Skipped: no text")
+        if not re.findall(r"<@([A-Z0-9]+)>", text):
             return
-
-        # Extract mentions (format: <@USER_ID>)
-        mentions = re.findall(r"<@([A-Z0-9]+)>", text)
-
-        if not mentions:
-            print(f"[MESSAGE] Skipped: no mentions in text")
-            return
-
-        print(f"[MESSAGE] Processing: text={text}, mentions={mentions}")
 
         try:
-            if _respond_to_donut_message(client, channel, ts, text):
-                print(f"[MESSAGE] Responded to donut chat message")
-            else:
-                print(f"[MESSAGE] Skipped: no valid person mentions found")
+            _respond_to_donut_message(client, channel, ts, text)
         except Exception as e:
             print(f"Error in handle_message: {e}")
 
@@ -159,13 +121,9 @@ def register_handlers(app: App) -> None:
         num_recovered_unprocessed = 0
         num_recovered_unconfirmed = 0
         for message in messages:
-            # Skip bot messages, thread replies, system messages
-            if message.get("bot_id"):
+            if not _is_actionable_user_message(message):
                 continue
             if message.get("thread_ts") and message.get("thread_ts") != message.get("ts"):
-                continue
-            subtype = message.get("subtype")
-            if subtype in ("channel_join", "member_left"):
                 continue
 
             text = message.get("text", "")
@@ -181,24 +139,19 @@ def register_handlers(app: App) -> None:
             )
 
             if not bot_already_reacted:
-                # Case 1: Never initially processed
                 try:
                     if _respond_to_donut_message(client, channel, ts, text):
                         num_recovered_unprocessed += 1
-                        print(f"[RECOVER] Responded to missed message {ts}")
                 except Exception as e:
                     print(f"[RECOVER] Error processing message {ts}: {e}")
                 continue
 
-            # Bot reacted — check thread reply state
             bot_reply = _find_bot_reply(client, channel, ts)
 
             if bot_reply is None:
-                # Case 2a: Bot reacted but never posted the thread reply
                 try:
                     _post_confirmation_prompt(client, channel, ts)
                     num_recovered_unprocessed += 1
-                    print(f"[RECOVER] Posted missing thread reply for {ts}")
                 except Exception as e:
                     print(f"[RECOVER] Error posting thread reply for {ts}: {e}")
                 continue
@@ -206,7 +159,6 @@ def register_handlers(app: App) -> None:
             if "Recorded" in bot_reply.get("text", ""):
                 continue
 
-            # Case 2b: User confirmed but bot missed the reaction event
             user_confirmed = any(
                 r.get("name") == "white_check_mark"
                 and any(u != bot_user_id for u in r.get("users", []))
@@ -216,7 +168,6 @@ def register_handlers(app: App) -> None:
                 continue
 
             if tracking.history_contains_ts(config.HISTORY_PATH, ts):
-                # Already recorded, just fix the bot reply
                 try:
                     client.chat_update(
                         channel=channel, ts=bot_reply["ts"], text="✅ Recorded!"
@@ -228,7 +179,6 @@ def register_handlers(app: App) -> None:
             try:
                 if _record_donut_confirmation(client, channel, ts, message):
                     num_recovered_unconfirmed += 1
-                    print(f"[RECOVER] Recorded missed confirmation for {ts}")
             except Exception as e:
                 print(f"[RECOVER] Error processing confirmation for {ts}: {e}")
 
@@ -246,72 +196,38 @@ def register_handlers(app: App) -> None:
     @app.event("reaction_added")
     def handle_reaction(event, client):
         """Track confirmation when someone reacts with checkmark to donut chat."""
+        if event.get("reaction") != "white_check_mark":
+            return
 
-        print(f"[REACTION EVENT] Received: {event}")
-
-        reaction = event.get("reaction")
-        user_id = event.get("user")
         channel = event.get("item", {}).get("channel")
         ts = event.get("item", {}).get("ts")
 
-        print(
-            f"[REACTION] reaction={reaction}, user={user_id}, channel={channel}, ts={ts}"
-        )
-
-        if reaction != "white_check_mark":
-            print(
-                f"[REACTION] Skipped: wrong emoji (got={reaction}, want=white_check_mark)"
-            )
+        if not channel or not ts or channel != config.DONUT_CHAT_CHANNEL:
             return
 
-        if not user_id:
-            print(f"[REACTION] Skipped: no user_id")
-            return
-
-        if not channel:
-            print(f"[REACTION] Skipped: no channel")
-            return
-
-        if not ts:
-            print(f"[REACTION] Skipped: no timestamp")
-            return
-
-        # Only process reactions in donut-chat channel
-        if channel != config.DONUT_CHAT_CHANNEL:
-            print(
-                f"[REACTION] Skipped: wrong channel (got={channel}, want={config.DONUT_CHAT_CHANNEL})"
-            )
-            return
-
-        # Check if this message was already recorded
         if tracking.history_contains_ts(config.HISTORY_PATH, ts):
-            print(f"[REACTION] Skipped: message {ts} already recorded in history")
             return
-
-        print(
-            f"[REACTION] Processing reaction: user={user_id}, channel={channel}, ts={ts}"
-        )
 
         try:
-            # Fetch the message
-            print(f"[REACTION] Fetching message from {channel} at {ts}")
             msg_response = client.conversations_history(
                 channel=channel, latest=ts, limit=1, inclusive=True
             )
-
-            if not msg_response.get("messages"):
-                print(f"[REACTION] ERROR: No message found at {ts}")
+            messages = msg_response.get("messages")
+            if not messages:
                 return
 
-            message = msg_response["messages"][0]
-
-            if _record_donut_confirmation(client, channel, ts, message):
-                print(f"[REACTION] Success! Confirmed donut chat for message {ts}")
-            else:
-                print(f"[REACTION] Skipped: no valid people found in message {ts}")
-
+            _record_donut_confirmation(client, channel, ts, messages[0])
         except Exception as e:
             print(f"Error in handle_reaction: {e}")
+
+
+def _is_actionable_user_message(message: dict) -> bool:
+    """Check if a message is an actionable user message (not bot/system)."""
+    if message.get("bot_id"):
+        return False
+    if message.get("subtype") in ("channel_join", "member_left"):
+        return False
+    return True
 
 
 def _respond_to_donut_message(client, channel: str, ts: str, text: str) -> bool:
@@ -362,7 +278,7 @@ def _find_bot_reply(client, channel: str, ts: str) -> dict | None:
     """
     try:
         thread_response = client.conversations_replies(
-            channel=channel, ts=ts, limit=100
+            channel=channel, ts=ts, limit=15
         )
     except Exception as e:
         print(f"Error fetching thread for {ts}: {e}")
