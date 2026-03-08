@@ -156,47 +156,91 @@ def register_handlers(app: App) -> None:
             )
             return
 
-        recovered = 0
+        num_recovered_unprocessed = 0
+        num_recovered_unconfirmed = 0
         for message in messages:
-            # Skip bot messages
+            # Skip bot messages, thread replies, system messages
             if message.get("bot_id"):
                 continue
-
-            # Skip thread replies
             if message.get("thread_ts") and message.get("thread_ts") != message.get("ts"):
                 continue
-
-            # Skip system messages
             subtype = message.get("subtype")
             if subtype in ("channel_join", "member_left"):
                 continue
 
             text = message.get("text", "")
             ts = message.get("ts")
-
             if not text or not ts:
                 continue
 
-            # Check if bot already reacted with :white_check_mark:
             reactions = message.get("reactions", [])
             bot_already_reacted = any(
                 r.get("name") == "white_check_mark"
                 and bot_user_id in r.get("users", [])
                 for r in reactions
             )
-            if bot_already_reacted:
+
+            if not bot_already_reacted:
+                # Case 1: Never initially processed
+                try:
+                    if _respond_to_donut_message(client, channel, ts, text):
+                        num_recovered_unprocessed += 1
+                        print(f"[RECOVER] Responded to missed message {ts}")
+                except Exception as e:
+                    print(f"[RECOVER] Error processing message {ts}: {e}")
+                continue
+
+            # Bot reacted — check thread reply state
+            bot_reply = _find_bot_reply(client, channel, ts)
+
+            if bot_reply is None:
+                # Case 2a: Bot reacted but never posted the thread reply
+                try:
+                    _post_confirmation_prompt(client, channel, ts)
+                    num_recovered_unprocessed += 1
+                    print(f"[RECOVER] Posted missing thread reply for {ts}")
+                except Exception as e:
+                    print(f"[RECOVER] Error posting thread reply for {ts}: {e}")
+                continue
+
+            if "Recorded" in bot_reply.get("text", ""):
+                continue
+
+            # Case 2b: User confirmed but bot missed the reaction event
+            user_confirmed = any(
+                r.get("name") == "white_check_mark"
+                and any(u != bot_user_id for u in r.get("users", []))
+                for r in reactions
+            )
+            if not user_confirmed:
+                continue
+
+            if tracking.history_contains_ts(config.HISTORY_PATH, ts):
+                # Already recorded, just fix the bot reply
+                try:
+                    client.chat_update(
+                        channel=channel, ts=bot_reply["ts"], text="✅ Recorded!"
+                    )
+                except Exception as e:
+                    print(f"[RECOVER] Error updating bot reply for {ts}: {e}")
                 continue
 
             try:
-                if _respond_to_donut_message(client, channel, ts, text):
-                    recovered += 1
-                    print(f"[RECOVER] Responded to missed message {ts}")
+                if _record_donut_confirmation(client, channel, ts, message):
+                    num_recovered_unconfirmed += 1
+                    print(f"[RECOVER] Recorded missed confirmation for {ts}")
             except Exception as e:
-                print(f"[RECOVER] Error processing message {ts}: {e}")
+                print(f"[RECOVER] Error processing confirmation for {ts}: {e}")
 
+        # build channel reply
+        reply = "Recovery complete."
+        if num_recovered_unprocessed > 0:
+            reply += f" Responded to {num_recovered_unprocessed} originally-overlooked message(s)."
+        if num_recovered_unconfirmed > 0:
+            reply += f" Recorded {num_recovered_unconfirmed} originally-unconfirmed chat(s)."
         client.chat_postMessage(
             channel=command["channel_id"],
-            text=f"Recovery complete. Responded to {recovered} missed message(s).",
+            text=reply,
         )
 
     @app.event("reaction_added")
@@ -260,86 +304,11 @@ def register_handlers(app: App) -> None:
                 return
 
             message = msg_response["messages"][0]
-            text = message.get("text", "")
-            poster_user_id = message.get("user")
 
-            print(f"[REACTION] Message: user={poster_user_id}, text={text[:50]}...")
-
-            # Extract mentions
-            mentions = re.findall(r"<@([A-Z0-9]+)>", text)
-            print(f"[REACTION] Found {len(mentions)} mention(s): {mentions}")
-
-            if not mentions:
-                print(f"[REACTION] Skipped: no mentions in message")
-                return
-
-            if not poster_user_id:
-                print(f"[REACTION] Skipped: no poster_user_id")
-                return
-
-            # Get emails for poster and mentioned users
-            poster_email = slack_client.get_user_email(client, poster_user_id)
-            if not poster_email:
-                print(f"ERROR: No email found for user {poster_user_id}")
-                return
-
-            # Normalize email for lookup
-            poster_email = _normalize_email(poster_email)
-
-            # Look up names in registry
-            registry = history.parse_registry(config.REGISTRY_PATH)
-            identifier_map = _build_identifier_mapping(registry)
-
-            if poster_email not in identifier_map:
-                print(f"ERROR: User with email {poster_email} not found in registry")
-                return
-
-            poster_name = registry[identifier_map[poster_email]].name
-
-            # Get mentioned people's emails and names
-            mentioned_names = _get_valid_mentioned_names(
-                mentions, client, registry, identifier_map
-            )
-            if not mentioned_names:
-                print(f"[REACTION] Skipped: No valid mentions found in message {ts}")
-                return
-
-            # Record donut chat for each pair
-            all_people = [poster_name] + mentioned_names
-            pairs = _generate_all_pairs(all_people)
-            print(f"[REACTION] Recording {len(pairs)} donut chat pair(s)...")
-            for person1, person2 in pairs:
-                print(f"[REACTION] Recording: {person1} <-> {person2}")
-                tracking.append_to_history(person1, person2, config.HISTORY_PATH, ts)
-
-            # Try to strikethrough the pair in the pairings message
-            _strikethrough_pair_in_message(
-                client, channel, poster_name, mentioned_names
-            )
-
-            # Find and update the bot's thread reply
-            print(f"[REACTION] Fetching thread replies for message {ts}")
-            thread_response = client.conversations_replies(
-                channel=channel, ts=ts, limit=100
-            )
-
-            bot_found = False
-            for thread_msg in thread_response.get("messages", []):
-                if thread_msg.get("bot_id"):
-                    # Found bot's message, edit it
-                    print(f"[REACTION] Updating bot message at {thread_msg['ts']}")
-                    client.chat_update(
-                        channel=channel, ts=thread_msg["ts"], text="✅ Recorded!"
-                    )
-                    bot_found = True
-                    break
-
-            if not bot_found:
-                print(f"[REACTION] WARNING: No bot message found in thread")
-
-            print(
-                f"[REACTION] Success! Confirmed {len(mentioned_names)} donut chat(s): {poster_name}"
-            )
+            if _record_donut_confirmation(client, channel, ts, message):
+                print(f"[REACTION] Success! Confirmed donut chat for message {ts}")
+            else:
+                print(f"[REACTION] Skipped: no valid people found in message {ts}")
 
         except Exception as e:
             print(f"Error in handle_reaction: {e}")
@@ -371,12 +340,90 @@ def _respond_to_donut_message(client, channel: str, ts: str, text: str) -> bool:
         return False
 
     client.reactions_add(channel=channel, timestamp=ts, name="white_check_mark")
+    _post_confirmation_prompt(client, channel, ts)
 
-    thread_reply = (
+    return True
+
+
+def _post_confirmation_prompt(client, channel: str, ts: str) -> None:
+    """Post the 'please react to confirm' thread reply."""
+    text = (
         "Please react to this message with :white_check_mark: "
         "to confirm the donut chat happened!"
     )
-    client.chat_postMessage(channel=channel, thread_ts=ts, text=thread_reply)
+    client.chat_postMessage(channel=channel, thread_ts=ts, text=text)
+
+
+def _find_bot_reply(client, channel: str, ts: str) -> dict | None:
+    """Find the bot's thread reply for a message.
+
+    Returns:
+        The bot's reply message dict, or None if not found.
+    """
+    try:
+        thread_response = client.conversations_replies(
+            channel=channel, ts=ts, limit=100
+        )
+    except Exception as e:
+        print(f"Error fetching thread for {ts}: {e}")
+        return None
+
+    for thread_msg in thread_response.get("messages", []):
+        if thread_msg.get("bot_id") and thread_msg.get("ts") != ts:
+            return thread_msg
+    return None
+
+
+def _record_donut_confirmation(
+    client, channel: str, ts: str, message: dict
+) -> bool:
+    """Record a donut chat confirmation from a message.
+
+    Resolves the poster and mentions, records pairs to history,
+    strikes through the pairings message, and updates the bot reply.
+
+    Returns:
+        True if the confirmation was recorded, False if no valid people found.
+    """
+    text = message.get("text", "")
+    poster_user_id = message.get("user")
+    mentions = re.findall(r"<@([A-Z0-9]+)>", text)
+
+    if not mentions or not poster_user_id:
+        return False
+
+    poster_email = slack_client.get_user_email(client, poster_user_id)
+    if not poster_email:
+        return False
+
+    poster_email = _normalize_email(poster_email)
+
+    registry = history.parse_registry(config.REGISTRY_PATH)
+    identifier_map = _build_identifier_mapping(registry)
+
+    if poster_email not in identifier_map:
+        return False
+
+    poster_name = registry[identifier_map[poster_email]].name
+
+    mentioned_names = _get_valid_mentioned_names(
+        mentions, client, registry, identifier_map
+    )
+    if not mentioned_names:
+        return False
+
+    # Record donut chat for each pair
+    all_people = [poster_name] + mentioned_names
+    pairs = _generate_all_pairs(all_people)
+    for person1, person2 in pairs:
+        tracking.append_to_history(person1, person2, config.HISTORY_PATH, ts)
+
+    _strikethrough_pair_in_message(client, channel, poster_name, mentioned_names)
+
+    # Update the bot's thread reply
+    bot_reply = _find_bot_reply(client, channel, ts)
+    if bot_reply:
+        client.chat_update(channel=channel, ts=bot_reply["ts"], text="✅ Recorded!")
 
     return True
 
