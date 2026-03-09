@@ -17,7 +17,17 @@ def register_handlers(app: App) -> None:
         """Respond when the bot is mentioned."""
         channel = event.get("channel")
         ts = event.get("ts")
+        thread_ts = event.get("thread_ts")
         text = event.get("text", "")
+
+        # If mentioned in a thread on the parent message with a recovery trigger phrase
+        if (
+            thread_ts
+            and thread_ts != ts
+            and re.search(r"try.*again|unacceptable|poop", text, re.IGNORECASE)
+        ):
+            _recover_single_message(client, channel, thread_ts)
+            return
 
         if profanity.contains_profanity(text):
             image_url = "https://avatars.mds.yandex.net/get-kinopoisk-image/1600647/b19fb75a-b0bd-4949-bf69-9fc6b658e340/3840x"
@@ -105,7 +115,6 @@ def register_handlers(app: App) -> None:
         ack()
 
         channel = config.DONUT_CHAT_CHANNEL
-        bot_user_id = client.auth_test()["user_id"]
 
         try:
             response = client.conversations_history(channel=channel)
@@ -126,61 +135,11 @@ def register_handlers(app: App) -> None:
             if message.get("thread_ts") and message.get("thread_ts") != message.get("ts"):
                 continue
 
-            text = message.get("text", "")
-            ts = message.get("ts")
-            if not text or not ts:
-                continue
-
-            reactions = message.get("reactions", [])
-            bot_already_reacted = any(
-                r.get("name") == "white_check_mark"
-                and bot_user_id in r.get("users", [])
-                for r in reactions
-            )
-
-            if not bot_already_reacted:
-                try:
-                    if _respond_to_donut_message(client, channel, ts, text):
-                        num_recovered_unprocessed += 1
-                except Exception as e:
-                    print(f"[RECOVER] Error processing message {ts}: {e}")
-                continue
-
-            bot_reply = _find_bot_reply(client, channel, ts)
-
-            if bot_reply is None:
-                try:
-                    _post_confirmation_prompt(client, channel, ts)
-                    num_recovered_unprocessed += 1
-                except Exception as e:
-                    print(f"[RECOVER] Error posting thread reply for {ts}: {e}")
-                continue
-
-            if "Recorded" in bot_reply.get("text", ""):
-                continue
-
-            user_confirmed = any(
-                r.get("name") == "white_check_mark"
-                and any(u != bot_user_id for u in r.get("users", []))
-                for r in reactions
-            )
-            if not user_confirmed:
-                continue
-
-            if tracking.history_contains_ts(config.HISTORY_PATH, ts):
-                try:
-                    client.chat_update(
-                        channel=channel, ts=bot_reply["ts"], text="✅ Recorded!"
-                    )
-                except Exception as e:
-                    print(f"[RECOVER] Error updating bot reply for {ts}: {e}")
-                continue
-
-            try:
-                if _record_donut_confirmation(client, channel, ts, message):
-                    num_recovered_unconfirmed += 1
-            except Exception as e:
-                print(f"[RECOVER] Error processing confirmation for {ts}: {e}")
+            result = _recover_single_message(client, channel, message=message)
+            if result == "unprocessed":
+                num_recovered_unprocessed += 1
+            elif result == "unconfirmed":
+                num_recovered_unconfirmed += 1
 
         # build channel reply
         reply = "Recovery complete."
@@ -478,3 +437,94 @@ def _get_valid_mentioned_names(
 
         mentioned_names.append(registry[person_id].name)
     return mentioned_names
+
+
+def _recover_single_message(
+    client, channel: str, parent_ts: str | None = None, message: dict | None = None
+) -> str | None:
+    """Run recovery logic for a single parent message.
+
+    Either parent_ts or message must be provided. If message is given, it is used
+    directly; otherwise the message is fetched by parent_ts.
+
+    Returns:
+        "unprocessed" if the message was newly responded to,
+        "unconfirmed" if a confirmed chat was newly recorded,
+        or None if no action was taken.
+    """
+    bot_user_id = client.auth_test()["user_id"]
+
+    if message is None:
+        try:
+            response = client.conversations_history(
+                channel=channel, latest=parent_ts, limit=1, inclusive=True
+            )
+            messages = response.get("messages", [])
+        except Exception as e:
+            print(f"[RECOVER-SINGLE] Error fetching message {parent_ts}: {e}")
+            return None
+
+        if not messages:
+            return None
+
+        message = messages[0]
+
+    if not _is_actionable_user_message(message):
+        return None
+
+    text = message.get("text", "")
+    ts = message.get("ts")
+    if not text or not ts:
+        return None
+
+    reactions = message.get("reactions", [])
+    bot_already_reacted = any(
+        r.get("name") == "white_check_mark"
+        and bot_user_id in r.get("users", [])
+        for r in reactions
+    )
+
+    if not bot_already_reacted:
+        try:
+            if _respond_to_donut_message(client, channel, ts, text):
+                return "unprocessed"
+        except Exception as e:
+            print(f"[RECOVER-SINGLE] Error processing message {ts}: {e}")
+        return None
+
+    bot_reply = _find_bot_reply(client, channel, ts)
+
+    if bot_reply is None:
+        try:
+            _post_confirmation_prompt(client, channel, ts)
+            return "unprocessed"
+        except Exception as e:
+            print(f"[RECOVER-SINGLE] Error posting thread reply for {ts}: {e}")
+        return None
+
+    if "Recorded" in bot_reply.get("text", ""):
+        return None
+
+    user_confirmed = any(
+        r.get("name") == "white_check_mark"
+        and any(u != bot_user_id for u in r.get("users", []))
+        for r in reactions
+    )
+    if not user_confirmed:
+        return None
+
+    if tracking.history_contains_ts(config.HISTORY_PATH, ts):
+        try:
+            client.chat_update(
+                channel=channel, ts=bot_reply["ts"], text="✅ Recorded!"
+            )
+        except Exception as e:
+            print(f"[RECOVER-SINGLE] Error updating bot reply for {ts}: {e}")
+        return None
+
+    try:
+        if _record_donut_confirmation(client, channel, ts, message):
+            return "unconfirmed"
+    except Exception as e:
+        print(f"[RECOVER-SINGLE] Error processing confirmation for {ts}: {e}")
+    return None
