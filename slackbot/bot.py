@@ -4,7 +4,7 @@ import csv
 import json
 
 from flask import Flask, Response, request
-from flask_cors import CORS
+from flask_cors import cross_origin
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 
@@ -28,7 +28,7 @@ print("[BOT] Event handlers registered")
 
 # Flask app
 flask_app = Flask(__name__)
-CORS(flask_app)
+
 handler = SlackRequestHandler(bolt_app)
 
 
@@ -58,6 +58,7 @@ def normalize_name(value: str, email_to_name: dict[str, str]) -> str:
 
 
 @flask_app.route("/chats", methods=["GET"])
+@cross_origin()
 def get_chats():
     email_to_name = load_registry()
     pairs = []
