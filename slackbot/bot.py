@@ -65,11 +65,14 @@ def get_chats():
     with open(config.HISTORY_PATH) as f:
         reader = csv.reader(f)
         for row in reader:
-            if len(row) == 2 and row[0] and row[1]:
-                pairs.append({
+            if len(row) >= 2 and row[0] and row[1]:
+                pair = {
                     "person1": normalize_name(row[0], email_to_name),
                     "person2": normalize_name(row[1], email_to_name),
-                })
+                }
+                if len(row) >= 3 and row[2].strip():
+                    pair["timestamp"] = row[2].strip()
+                pairs.append(pair)
     return Response(json.dumps(pairs), mimetype="application/json")
 
 
